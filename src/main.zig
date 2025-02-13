@@ -71,9 +71,9 @@ pub fn main() !void {
 
     // try to find the currently primary session
     for (primary_clients.items, 0..) |client, idx| {
-        // if we found a non-primary app, just set it as the new active app
         if (client.state.primary_app) {
             primary_session_idx = idx;
+            break;
         }
     }
 
