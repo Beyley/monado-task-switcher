@@ -1,0 +1,15 @@
+.{
+    .name = "monado-task-switcher",
+    .version = "0.0.0",
+    .dependencies = .{
+        .monado = .{
+            .url = "git+https://gitlab.freedesktop.org/monado/monado#907fd6d338390ac3a07f7f06966c68637b90ecd8",
+            .hash = "1220c7105d52499f430f71001646e7c57d2e28317c22150339bb1cdc1fd81b7da2d0",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src/",
+    },
+}
