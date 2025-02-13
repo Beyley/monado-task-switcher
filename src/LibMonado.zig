@@ -3,11 +3,51 @@ const builtin = @import("builtin");
 
 const c = @import("libmonado_c");
 
+pub const Root = ?*c.mnd_root_t;
+
+pub const ClientFlags = packed struct(u32) {
+    primary_app: bool,
+    session_active: bool,
+    session_visible: bool,
+    session_focused: bool,
+    session_overlay: bool,
+    io_active: bool,
+    _padding: u26,
+};
+
 const log = std.log.scoped(.libmonado_loader);
 
 pub const LibMonado = @This();
 
 dynlib: std.DynLib,
+
+mnd_api_get_version: *const @TypeOf(c.mnd_api_get_version),
+mnd_root_create: *const @TypeOf(c.mnd_root_create),
+mnd_root_destroy: *const @TypeOf(c.mnd_root_destroy),
+mnd_root_update_client_list: *const @TypeOf(c.mnd_root_update_client_list),
+mnd_root_get_number_clients: *const @TypeOf(c.mnd_root_get_number_clients),
+mnd_root_get_client_id_at_index: *const @TypeOf(c.mnd_root_get_client_id_at_index),
+mnd_root_get_client_name: *const @TypeOf(c.mnd_root_get_client_name),
+mnd_root_get_client_state: *const @TypeOf(c.mnd_root_get_client_state),
+mnd_root_set_client_primary: *const @TypeOf(c.mnd_root_set_client_primary),
+mnd_root_set_client_focused: *const @TypeOf(c.mnd_root_set_client_focused),
+mnd_root_toggle_client_io_active: *const @TypeOf(c.mnd_root_toggle_client_io_active),
+mnd_root_get_device_count: *const @TypeOf(c.mnd_root_get_device_count),
+mnd_root_get_device_info_bool: *const @TypeOf(c.mnd_root_get_device_info_bool),
+mnd_root_get_device_info_i32: *const @TypeOf(c.mnd_root_get_device_info_i32),
+mnd_root_get_device_info_u32: *const @TypeOf(c.mnd_root_get_device_info_u32),
+mnd_root_get_device_info_float: *const @TypeOf(c.mnd_root_get_device_info_float),
+mnd_root_get_device_info_string: *const @TypeOf(c.mnd_root_get_device_info_string),
+mnd_root_get_device_info: *const @TypeOf(c.mnd_root_get_device_info),
+mnd_root_get_device_from_role: *const @TypeOf(c.mnd_root_get_device_from_role),
+mnd_root_recenter_local_spaces: *const @TypeOf(c.mnd_root_recenter_local_spaces),
+mnd_root_get_reference_space_offset: *const @TypeOf(c.mnd_root_get_reference_space_offset),
+mnd_root_set_reference_space_offset: *const @TypeOf(c.mnd_root_set_reference_space_offset),
+mnd_root_get_tracking_origin_offset: *const @TypeOf(c.mnd_root_get_tracking_origin_offset),
+mnd_root_set_tracking_origin_offset: *const @TypeOf(c.mnd_root_set_tracking_origin_offset),
+mnd_root_get_tracking_origin_count: *const @TypeOf(c.mnd_root_get_tracking_origin_count),
+mnd_root_get_tracking_origin_name: *const @TypeOf(c.mnd_root_get_tracking_origin_name),
+mnd_root_get_device_battery_status: *const @TypeOf(c.mnd_root_get_device_battery_status),
 
 const OpenXrRuntimeManifest = struct {
     pub const Runtime = struct {
@@ -20,6 +60,21 @@ const OpenXrRuntimeManifest = struct {
     file_format_version: []const u8,
     runtime: Runtime,
 };
+
+pub fn handleResult(ret: c.mnd_result_t) !void {
+    if (ret == c.MND_SUCCESS) return;
+
+    return switch (ret) {
+        -1 => error.InvalidVersion,
+        -2 => error.InvalidValue,
+        -3 => error.ConnectingFailed,
+        -4 => error.OperationFailed,
+        -5 => error.RecenteringNotSupported,
+        -6 => error.InvalidProperty,
+        -7 => error.InvalidOperation,
+        else => error.UnknownError,
+    };
+}
 
 pub fn load(arena: std.mem.Allocator) !LibMonado {
     const openxr_runtime_file = try findOpenXrRuntimeFile(arena, arena);
@@ -47,9 +102,31 @@ pub fn load(arena: std.mem.Allocator) !LibMonado {
     var dynlib = try std.DynLib.open(libmonado_path);
     errdefer dynlib.close();
 
-    return .{
-        .dynlib = dynlib,
-    };
+    const mnd_api_get_version = dynlib.lookup(*const @TypeOf(c.mnd_api_get_version), "mnd_api_get_version") orelse return error.MissingMonadoApiVersionFunction;
+
+    var major: u32 = undefined;
+    var minor: u32 = undefined;
+    var patch: u32 = undefined;
+    mnd_api_get_version(&major, &minor, &patch);
+
+    // basic version check...
+    if (c.MND_API_VERSION_MAJOR != major or minor < c.MND_API_VERSION_MINOR) return error.UnsupportedMonadoVersion;
+
+    log.debug("Loading libmonado with version {d}.{d}.{d}", .{ major, minor, patch });
+
+    var ret: LibMonado = undefined;
+    ret.dynlib = dynlib;
+
+    inline for (@typeInfo(LibMonado).@"struct".fields) |field| {
+        if (comptime std.mem.eql(u8, "dynlib", field.name)) continue;
+
+        @field(ret, field.name) = dynlib.lookup(field.type, field.name) orelse {
+            log.err("Failed to load function pointer for function {s}", .{field.name});
+            return error.FailedToLoadFnPtr;
+        };
+    }
+
+    return ret;
 }
 
 pub fn deinit(self: *LibMonado) void {
