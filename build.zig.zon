@@ -4,8 +4,8 @@
     .fingerprint = 0xf5964125469dd198,
     .dependencies = .{
         .monado = .{
-            .url = "git+https://gitlab.freedesktop.org/monado/monado#907fd6d338390ac3a07f7f06966c68637b90ecd8",
-            .hash = "N-V-__8AANKoTAHHEF1SSZ9DD3EAFkbnxX0uKDF8IhUDObsc",
+            .url = "git+https://gitlab.freedesktop.org/Beyley/monado?ref=META_recommended_layer_resolution#37e739065fd3465ead50437134cf085bf0c934a6",
+            .hash = "N-V-__8AADYUcAGcUx-DR_bz8oA4scLmy9YSE8QKbhBsYJ0P",
         },
     },
     .paths = .{

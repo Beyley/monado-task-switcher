@@ -52,7 +52,8 @@ pub fn main() !void {
         const state: LibMonado.ClientFlags = @bitCast(state_flags);
 
         // Skip clients without an active session or that are overlays
-        if (!state.session_active or state.session_overlay) continue;
+        // if (!state.session_active or state.session_overlay) continue;
+        if (!state.session_active) continue;
 
         const name = try gpa.dupeZ(u8, std.mem.span(name_ptr.?));
         errdefer gpa.free(name);
@@ -61,29 +62,52 @@ pub fn main() !void {
         log.debug("Found connected client {s} ({d}), with state {}", .{ name, client_id, state });
     }
 
-    // we have no work to do..
-    if (primary_clients.items.len < 2) {
-        log.info("Found <2 non-overlay apps, nothing to do...", .{});
+    const args = try std.process.argsAlloc(gpa);
+    defer std.process.argsFree(gpa, args);
+    if (args.len < 2) {
+        log.err("need scale", .{});
         return;
     }
 
-    var primary_session_idx: ?usize = null;
+    const wanted_scale: f32 = try std.fmt.parseFloat(f32, args[1]);
 
-    // try to find the currently primary session
-    for (primary_clients.items, 0..) |client, idx| {
-        if (client.state.primary_app) {
-            primary_session_idx = idx;
-            break;
-        }
+    for (primary_clients.items) |client| {
+        var scale: f32 = undefined;
+        var width: c_int = undefined;
+        var height: c_int = undefined;
+
+        try LibMonado.handleResult(libmonado.mnd_root_set_client_resolution_scale(root, client.id, 0, wanted_scale));
+        try LibMonado.handleResult(libmonado.mnd_root_set_client_resolution_scale(root, client.id, 1, wanted_scale));
+
+        try LibMonado.handleResult(libmonado.mnd_root_get_client_recommended_resolution(root, client.id, 0, &scale, &width, &height));
+        log.info("0: Got recommended resolution {d}x{d}, current scale: {d}", .{ width, height, scale });
+        try LibMonado.handleResult(libmonado.mnd_root_get_client_recommended_resolution(root, client.id, 1, &scale, &width, &height));
+        log.info("1: Got recommended resolution {d}x{d}, current scale: {d}", .{ width, height, scale });
     }
 
-    // calculate the idx of the new primary client, just selecting the second(yes i know) client if we couldnt find an active client..
-    const new_primary_session_idx = ((primary_session_idx orelse 0) + 1) % primary_clients.items.len;
+    // we have no work to do..
+    // if (primary_clients.items.len < 2) {
+    //     log.info("Found <2 non-overlay apps, nothing to do...", .{});
+    //     return;
+    // }
 
-    const new_primary_client = primary_clients.items[new_primary_session_idx];
+    // var primary_session_idx: ?usize = null;
 
-    log.info("Setting {s} as the new primary client!", .{new_primary_client.name});
+    // // try to find the currently primary session
+    // for (primary_clients.items, 0..) |client, idx| {
+    //     if (client.state.primary_app) {
+    //         primary_session_idx = idx;
+    //         break;
+    //     }
+    // }
 
-    // set it as primary
-    try LibMonado.handleResult(libmonado.mnd_root_set_client_primary(root, new_primary_client.id));
+    // // calculate the idx of the new primary client, just selecting the second(yes i know) client if we couldnt find an active client..
+    // const new_primary_session_idx = ((primary_session_idx orelse 0) + 1) % primary_clients.items.len;
+
+    // const new_primary_client = primary_clients.items[new_primary_session_idx];
+
+    // log.info("Setting {s} as the new primary client!", .{new_primary_client.name});
+
+    // // set it as primary
+    // try LibMonado.handleResult(libmonado.mnd_root_set_client_primary(root, new_primary_client.id));
 }

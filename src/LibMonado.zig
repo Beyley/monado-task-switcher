@@ -48,6 +48,8 @@ mnd_root_set_tracking_origin_offset: *const @TypeOf(c.mnd_root_set_tracking_orig
 mnd_root_get_tracking_origin_count: *const @TypeOf(c.mnd_root_get_tracking_origin_count),
 mnd_root_get_tracking_origin_name: *const @TypeOf(c.mnd_root_get_tracking_origin_name),
 mnd_root_get_device_battery_status: *const @TypeOf(c.mnd_root_get_device_battery_status),
+mnd_root_get_client_recommended_resolution: *const @TypeOf(c.mnd_root_get_client_recommended_resolution),
+mnd_root_set_client_resolution_scale: *const @TypeOf(c.mnd_root_set_client_resolution_scale),
 
 const OpenXrRuntimeManifest = struct {
     pub const Runtime = struct {
@@ -78,14 +80,14 @@ pub fn handleResult(ret: c.mnd_result_t) !void {
 
 pub fn load(arena: std.mem.Allocator) !LibMonado {
     const openxr_runtime_file = try findOpenXrRuntimeFile(arena, arena);
-    defer openxr_runtime_file[1].close();
+    defer openxr_runtime_file.file.close();
 
-    log.debug("Found OpenXR runtime file at path {s}", .{openxr_runtime_file[0]});
+    log.debug("Found OpenXR runtime file at path {s}", .{openxr_runtime_file.path});
 
-    var buffered_reader = std.io.bufferedReader(openxr_runtime_file[1].reader());
-    const reader = buffered_reader.reader();
+    var read_buf: [1024]u8 = undefined;
+    var reader = openxr_runtime_file.file.reader(&read_buf);
 
-    var json_reader = std.json.reader(arena, reader);
+    var json_reader = std.json.Reader.init(arena, &reader.interface);
 
     const manifest = try std.json.parseFromTokenSourceLeaky(OpenXrRuntimeManifest, arena, &json_reader, .{
         .ignore_unknown_fields = true,
@@ -94,7 +96,7 @@ pub fn load(arena: std.mem.Allocator) !LibMonado {
     });
 
     const libmonado_path = if (manifest.runtime.MND_libmonado_path) |relative_libmonado_path|
-        try std.fs.path.resolve(arena, &.{ std.fs.path.dirname(openxr_runtime_file[0]) orelse ".", relative_libmonado_path })
+        try std.fs.path.resolve(arena, &.{ std.fs.path.dirname(openxr_runtime_file.path) orelse ".", relative_libmonado_path })
     else
         "libmonado.so";
 
@@ -133,9 +135,21 @@ pub fn deinit(self: *LibMonado) void {
     self.dynlib.close();
 }
 
-const FoundRuntimeFile = struct { []const u8, std.fs.File };
+const FoundRuntimeFile = struct { path: []const u8, file: std.fs.File };
 
 fn findOpenXrRuntimeFile(gpa: std.mem.Allocator, arena: std.mem.Allocator) !FoundRuntimeFile {
+    const maybe_xr_runtime_json_env_var: ?[]u8 = std.process.getEnvVarOwned(arena, "XR_RUNTIME_JSON") catch |err| env_error: {
+        if (err == error.EnvironmentVariableNotFound)
+            break :env_error null;
+
+        return err;
+    };
+    if (maybe_xr_runtime_json_env_var) |xr_runtime_json_path| {
+        const realpath = try std.fs.cwd().realpathAlloc(arena, xr_runtime_json_path);
+
+        return .{ .path = realpath, .file = try std.fs.openFileAbsolute(realpath, .{}) };
+    }
+
     var config_dirs_to_check: std.ArrayListUnmanaged(std.fs.Dir) = .empty;
     defer {
         for (config_dirs_to_check.items) |*dir| {
@@ -214,7 +228,10 @@ fn checkDirForOpenXrRuntimeFile(gpa: std.mem.Allocator, arena: std.mem.Allocator
 
     if (found_runtime_file == null) return null;
 
-    return .{ runtime_file_realpath.?, found_runtime_file.? };
+    return .{
+        .path = runtime_file_realpath.?,
+        .file = found_runtime_file.?,
+    };
 }
 
 fn targetToRuntimePath(comptime target: std.Target) []const u8 {

@@ -29,6 +29,7 @@ pub fn build(b: *std.Build) !void {
     const exe = b.addExecutable(.{
         .name = "monado-task-switcher",
         .root_module = exe_mod,
+        .use_llvm = true,
     });
 
     b.installArtifact(exe);
